@@ -3,8 +3,13 @@ Sistema de recomendacao por similaridade visual: dado um produto (imagem),
 recomenda os K produtos com aparencia mais parecida, usando a distancia de
 cosseno entre os embeddings extraidos por scripts/extract_features.py.
 
-Nao usa nenhum dado textual do produto (preco, marca, categoria), so a
-similaridade entre os vetores de features visuais.
+A busca e restrita a produtos da MESMA categoria da consulta: um relogio
+sempre recomenda outros relogios, um oculos de sol sempre recomenda outros
+oculos de sol, nunca um produto de tipo diferente por acaso ter aparencia
+parecida. A categoria aqui funciona como o "tipo de produto" (um relogio
+continua sendo relogio independente da marca ou preco), nao como um dado
+textual de marketing, o ranking dentro dela e feito 100% por aparencia
+visual, sem olhar preco, marca ou nome do produto.
 """
 
 import os
@@ -26,11 +31,18 @@ def load_features():
     return npz["features"], npz["ids"], npz["classes"], npz["paths"]
 
 
-def recommend(query_idx, features, k=TOP_K):
-    nn = NearestNeighbors(n_neighbors=k + 1, metric="cosine")
-    nn.fit(features)
-    distances, indices = nn.kneighbors(features[query_idx:query_idx + 1])
-    return indices[0][1:], distances[0][1:]  # exclui a propria imagem (vizinho mais proximo de si mesma)
+def recommend(query_idx, features, classes, k=TOP_K):
+    query_class = classes[query_idx]
+    same_class_idxs = np.where(classes == query_class)[0]
+
+    nn = NearestNeighbors(n_neighbors=min(k + 1, len(same_class_idxs)), metric="cosine")
+    nn.fit(features[same_class_idxs])
+    distances, local_indices = nn.kneighbors(features[query_idx:query_idx + 1])
+
+    global_indices = same_class_idxs[local_indices[0]]
+    # remove a propria imagem da lista (vizinho mais proximo de si mesma, distancia 0)
+    mask = global_indices != query_idx
+    return global_indices[mask][:k], distances[0][mask][:k]
 
 
 def plot_recommendation(query_idx, neighbor_idxs, distances, features, classes, paths, out_path):
@@ -59,7 +71,7 @@ def main():
     features, ids, classes, paths = load_features()
     query_idx = int(sys.argv[1]) if len(sys.argv) > 1 else 0
 
-    neighbor_idxs, distances = recommend(query_idx, features)
+    neighbor_idxs, distances = recommend(query_idx, features, classes)
     print(f"Consulta: {paths[query_idx]} (classe: {classes[query_idx]})")
     for idx, dist in zip(neighbor_idxs, distances):
         print(f"  recomendado: {paths[idx]} (classe: {classes[idx]}, distância cosseno: {dist:.4f})")

@@ -1,15 +1,15 @@
 """
-Avaliacao quantitativa do sistema de recomendacao: para cada imagem do
-dataset, busca os K vizinhos mais proximos por similaridade visual e mede
-que fracao deles pertence a mesma categoria da consulta.
+Avaliacao quantitativa do sistema de recomendacao.
 
-Isso nao e uma metrica perfeita, similaridade visual de verdade nao precisa
-respeitar categoria (um sapato branco pode ser mais parecido visualmente com
-uma bolsa branca do que com um sapato preto), mas serve como um sinal
-quantitativo razoavel: se o extrator de features capturasse só ruido, o
-acerto por categoria seria em torno de 1/5 = 20% (5 classes). Um valor bem
-acima disso indica que os embeddings realmente capturam alguma nocao visual
-coerente que tende a se alinhar com a categoria do produto.
+Como scripts/recommend.py agora restringe a busca a produtos da mesma
+categoria da consulta, a antiga metrica de "precisao por categoria" fica
+100% por construcao, deixa de medir qualquer coisa interessante. A pergunta
+que importa agora e outra: dentro da categoria, o ranking por aparencia
+visual e realmente melhor do que escolher vizinhos ao acaso? Para responder,
+comparo, para cada imagem, a distancia media aos seus K vizinhos mais
+proximos (dentro da mesma categoria) contra a distancia media a K itens
+aleatorios da mesma categoria. Se o extrator de features nao capturasse
+nada util, as duas distancias seriam parecidas.
 """
 
 import os
@@ -19,32 +19,48 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
+from sklearn.metrics.pairwise import cosine_distances
 
 FEATURES_PATH = "data/features.npz"
 K_VALUES = [1, 3, 5, 10]
+SEED = 42
 
 
 def main():
+    rng = np.random.default_rng(SEED)
     npz = np.load(FEATURES_PATH, allow_pickle=True)
     features, classes = npz["features"], npz["classes"]
 
     max_k = max(K_VALUES)
-    nn = NearestNeighbors(n_neighbors=max_k + 1, metric="cosine")
-    nn.fit(features)
-    _, indices = nn.kneighbors(features)
+    nn_dist_by_k = {k: [] for k in K_VALUES}
+    random_dist_by_k = {k: [] for k in K_VALUES}
 
-    precisions = {}
+    for cls in sorted(set(classes)):
+        idxs = np.where(classes == cls)[0]
+        cls_features = features[idxs]
+
+        nn = NearestNeighbors(n_neighbors=min(max_k + 1, len(idxs)), metric="cosine")
+        nn.fit(cls_features)
+        distances, _ = nn.kneighbors(cls_features)
+        distances = distances[:, 1:]  # remove a propria imagem (distancia 0)
+
+        for k in K_VALUES:
+            nn_dist_by_k[k].extend(distances[:, :k].mean(axis=1))
+
+            for i in range(len(idxs)):
+                choices = rng.choice([j for j in range(len(idxs)) if j != i],
+                                      size=min(k, len(idxs) - 1), replace=False)
+                d = cosine_distances(cls_features[i:i + 1], cls_features[choices])
+                random_dist_by_k[k].append(d.mean())
+
+    print("Distância de cosseno média (menor = mais parecido):")
+    print(f"{'K':>4} {'Vizinhos por aparência':>24} {'Itens aleatórios (mesma categoria)':>36}")
+    means_nn, means_random = [], []
     for k in K_VALUES:
-        hits = []
-        for i in range(len(features)):
-            neighbor_idxs = indices[i][1:k + 1]  # exclui a propria imagem
-            match_frac = np.mean(classes[neighbor_idxs] == classes[i])
-            hits.append(match_frac)
-        precisions[k] = np.mean(hits)
-        print(f"precision@{k}: {precisions[k]:.4f}")
-
-    chance_level = 1 / len(set(classes))
-    print(f"nivel de chance (5 classes balanceadas): {chance_level:.4f}")
+        m_nn, m_rand = np.mean(nn_dist_by_k[k]), np.mean(random_dist_by_k[k])
+        means_nn.append(m_nn)
+        means_random.append(m_rand)
+        print(f"{k:>4} {m_nn:>24.4f} {m_rand:>36.4f}")
 
     plt.rcParams.update({
         "font.family": "serif",
@@ -55,21 +71,22 @@ def main():
         "savefig.bbox": "tight",
     })
 
-    fig, ax = plt.subplots(figsize=(4.2, 3.2))
-    ks = list(precisions.keys())
-    vals = list(precisions.values())
-    ax.bar([str(k) for k in ks], vals, color="#1f5fa8")
-    ax.axhline(chance_level, color="#c62828", linestyle="--", label=f"nível de chance ({chance_level:.2f})")
-    ax.set_ylim(0, 1.05)
+    x = np.arange(len(K_VALUES))
+    width = 0.35
+    fig, ax = plt.subplots(figsize=(4.5, 3.2))
+    ax.bar(x - width / 2, means_nn, width, label="Recomendado (por aparência)", color="#1f5fa8")
+    ax.bar(x + width / 2, means_random, width, label="Aleatório (mesma categoria)", color="#9e9e9e")
+    ax.set_xticks(x)
+    ax.set_xticklabels([str(k) for k in K_VALUES])
     ax.set_xlabel("K (número de recomendações)")
-    ax.set_ylabel("Precisão por categoria")
-    ax.set_title("Precision@K do sistema de recomendação")
-    ax.legend()
+    ax.set_ylabel("Distância de cosseno média")
+    ax.set_title("Recomendado x aleatório, dentro da mesma categoria")
+    ax.legend(fontsize=7)
     fig.tight_layout()
     os.makedirs("results", exist_ok=True)
-    fig.savefig("results/precision_at_k.png", dpi=600)
+    fig.savefig("results/recomendado_vs_aleatorio.png", dpi=600)
     plt.close(fig)
-    print("Salvo results/precision_at_k.png")
+    print("\nSalvo results/recomendado_vs_aleatorio.png")
 
 
 if __name__ == "__main__":
