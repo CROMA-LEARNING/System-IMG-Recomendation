@@ -2,6 +2,16 @@
 Monta um subconjunto do Fashion Product Images Dataset (Kaggle) com N imagens
 de cada uma das classes escolhidas, copiando os arquivos e salvando um CSV
 de metadados usado pelos proximos scripts.
+
+O dataset baixado do Kaggle (nao incluso neste repositorio, veja o README)
+deve estar extraido em RAW_DATA_DIR antes de rodar este script:
+
+    kaggle datasets download -d paramaggarwal/fashion-product-images-small
+    unzip fashion-product-images-small.zip -d raw_data/
+
+Os arquivos dataset/ ja commitados neste repositorio sao o resultado deste
+script, entao rodar de novo so e necessario para gerar um subconjunto
+diferente (outras classes, outro N_PER_CLASS).
 """
 
 import csv
@@ -11,8 +21,9 @@ import shutil
 
 random.seed(42)
 
-SRC_IMAGES = "/tmp/fashion_dataset/images"
-SRC_STYLES = "/tmp/fashion_dataset/styles.csv"
+RAW_DATA_DIR = os.environ.get("RAW_DATA_DIR", "raw_data")
+SRC_IMAGES = os.path.join(RAW_DATA_DIR, "images")
+SRC_STYLES = os.path.join(RAW_DATA_DIR, "styles.csv")
 DST_ROOT = "dataset"
 N_PER_CLASS = 150
 

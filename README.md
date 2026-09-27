@@ -62,8 +62,13 @@ Quanto menor a distância de cosseno, mais parecidas as imagens. Os produtos rec
 
 ## Como executar
 
+`dataset/` já vem pronto neste repositório (as 750 imagens usadas nos resultados), então os dois primeiros passos abaixo só são necessários para gerar um subconjunto diferente:
+
 ```bash
-python scripts/build_dataset.py           # monta o subconjunto de 750 imagens em 5 classes
+kaggle datasets download -d paramaggarwal/fashion-product-images-small
+unzip fashion-product-images-small.zip -d raw_data/
+
+python scripts/build_dataset.py           # monta o subconjunto de imagens a partir de raw_data/
 python scripts/extract_features.py        # extrai os embeddings da MobileNetV2
 python scripts/evaluate.py                # compara recomendado x aleatorio no dataset inteiro
 python scripts/recommend.py <indice>      # gera a recomendação para uma imagem do dataset
